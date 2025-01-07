@@ -1,0 +1,7 @@
+test/
+train/
+val/
+.env/
+venv/
+*.xlsx*
+*.csv
