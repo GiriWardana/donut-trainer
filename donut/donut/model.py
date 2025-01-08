@@ -5,6 +5,7 @@ MIT License
 """
 import math
 import os
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
 import re
 from typing import Any, List, Optional, Union
 
@@ -23,6 +24,8 @@ from transformers import MBartConfig, MBartForCausalLM, XLMRobertaTokenizer
 from transformers.file_utils import ModelOutput
 from transformers.modeling_utils import PretrainedConfig, PreTrainedModel
 
+torch.cuda.empty_cache()
+torch.backends.cudnn.benchmark = True
 
 class SwinEncoder(nn.Module):
     r"""

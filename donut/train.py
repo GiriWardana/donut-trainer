@@ -6,7 +6,10 @@ MIT License
 import argparse
 import datetime
 import json
+import yaml
 import os
+# Set PYTORCH_CUDA_ALLOC_CONF environment variable
+# os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "caching_allocator"
 import random
 from io import BytesIO
 from os.path import basename
@@ -15,6 +18,12 @@ from pathlib import Path
 import numpy as np
 import pytorch_lightning as pl
 import torch
+torch.cuda.empty_cache()
+torch.cuda.set_per_process_memory_fraction(0.9, device=0)
+import gc
+# del variables
+gc.collect()
+torch.cuda.memory_summary(device=None, abbreviated=False)
 from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 from pytorch_lightning.loggers.tensorboard import TensorBoardLogger
 from pytorch_lightning.plugins import CheckpointIO
@@ -40,15 +49,33 @@ class CustomCheckpointIO(CheckpointIO):
         return super().remove_checkpoint(path)
 
 
+# @rank_zero_only
+# def save_config_file(config, path):
+#     if not Path(path).exists():
+#         os.makedirs(path)
+#     save_path = Path(path) / "config.yaml"
+#     print(config.dumps())
+#     with open(save_path, "w") as f:
+#         f.write(config.dumps(modified_color=None, quote_str=True))
+#         print(f"Config is saved at {save_path}")
 @rank_zero_only
 def save_config_file(config, path):
     if not Path(path).exists():
         os.makedirs(path)
-    save_path = Path(path) / "config.yaml"
+
+    # Save as YAML file (this is already happening)
+    save_path_yaml = Path(path) / "config.yaml"
     print(config.dumps())
-    with open(save_path, "w") as f:
+    with open(save_path_yaml, "w") as f:
         f.write(config.dumps(modified_color=None, quote_str=True))
-        print(f"Config is saved at {save_path}")
+        print(f"Config is saved at {save_path_yaml}")
+
+    # Save as JSON file for compatibility
+    save_path_json = Path(path) / "config.json"
+    config_dict = yaml.safe_load(config.dumps(modified_color=None, quote_str=True))  # Convert YAML to dict
+    with open(save_path_json, "w") as f:
+        json.dump(config_dict, f, indent=4)
+        print(f"Config is also saved as {save_path_json}")
 
 
 class ProgressBar(pl.callbacks.TQDMProgressBar):
@@ -128,10 +155,18 @@ def train(config):
 
     lr_callback = LearningRateMonitor(logging_interval="step")
 
+    # checkpoint_callback = ModelCheckpoint(
+    #     monitor="val_metric",
+    #     dirpath=Path(config.result_path) / config.exp_name / config.exp_version,
+    #     filename="artifacts",
+    #     save_top_k=1,
+    #     save_last=False,
+    #     mode="min",
+    # )
     checkpoint_callback = ModelCheckpoint(
         monitor="val_metric",
         dirpath=Path(config.result_path) / config.exp_name / config.exp_version,
-        filename="artifacts",
+        filename="checkpoint-{epoch}",  # A proper format for naming
         save_top_k=1,
         save_last=False,
         mode="min",
@@ -158,6 +193,13 @@ def train(config):
     )
 
     trainer.fit(model_module, data_module, ckpt_path=config.get("resume_from_checkpoint_path", None))
+    model_path = Path(config.result_path) / config.exp_name / config.exp_version / "pytorch_model.bin"
+    print(f"Saving model to {model_path}")
+    torch.save(model_module.model.state_dict(), model_path)
+    # Save the tokenizer as well after training
+    tokenizer = model_module.model.decoder.tokenizer  # Example for saving tokenizer (modify as per your implementation)
+    tokenizer.save_pretrained(Path(config.result_path) / config.exp_name / config.exp_version)
+
 
 
 if __name__ == "__main__":
